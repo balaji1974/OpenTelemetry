@@ -889,6 +889,90 @@ docker compose down
 ## Open Telemetry Collectors - Export traces to Zipkin & Jaeger
 Collecting Traces (otel-trace-exporter)
 ```xml
+Create spring boot application otel-trace-exporter and 
+following steps 1 to 9 as otel-collector application (previous steps)
+Check if all monitoring parameters are pushed to otel-collector 
+docker logs  -f -n100 otel-collector
+
+Lets now push tracing to Zipkin and Jaeger 
+1. In docker-compose.yaml file add the following services:
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - otel-network
+      
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - otel-network
+
+2. Under the otel-collector service in docker-compose.yaml add the following dependency:
+    depends_on:
+      - zipkin
+      - jaeger
+This makes sure otel-collector is started only after zipkin and jaeger containers start.
+
+3. In the otel-collector-config.yaml add the following under the exporter
+to indicate the collector to export data to zipkin and jaeger (otlp supported export)
+exporters:
+  debug:
+    verbosity: detailed       # Logs incoming metrics and traces , Add debug exporter in your Collector config to visually verify metrics
+    # Then when you run the collector, it will log received metrics to the console.
+  zipkin:
+    endpoint: "http://zipkin:9411/api/v2/spans"
+  otlp: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
+    endpoint: "jaeger:4317"
+    tls:
+      insecure: true # Use insecure connection if not using TLS
+
+
+4. In the otel-collector-config.yaml add the following under the service -> pipeline 
+-> traces -> exporters
+
+service:
+  pipelines:
+    traces:
+      exporters: [zipkin,otlp,debug]
+
+* Note do not make any changes to other configurations already existing in this section.
+
+5. Clean and Build the application 
+Clean and Build the application and check if 
+otel-trace-exporter-0.0.1-SNAPSHOT.jar is created on the /target folder 
+
+6. Run the application from the project root directory
+docker compose up -d
+
+7. Excute the curl command to see the random numbers being returned:
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+
+8. Check the logs of the collector
+docker logs  -f -n100 otel-collector
+We can see all metrics, logs and traces collected by our collector
+
+9. Check if traces are exported to Zipkin:
+Zipkin
+http://localhost:9411/
+
+10. Check if traces are exported to Jaeger 
+Jaeger
+http://localhost:16686/
+Search -> Service Name (random-generator) -> Find Traces 
+
+11. Close the application
+docker compose down
 
 ```
 

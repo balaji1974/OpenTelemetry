@@ -1,0 +1,55 @@
+services:
+  random-generator:
+    container_name: random-generator
+    build: ./
+    environment:
+      OTEL_SERVICE_NAME: 'random-generator'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4318'
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+      OTEL_LOGS_EXPORTER: 'otlp'
+      OTEL_TRACES_EXPORTER: 'otlp'
+      OTEL_METRICS_EXPORTER: 'otlp'
+    ports:
+      - '8080:8080'
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+ 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      - "4318:4318"  # OTLP HTTP endpoint
+      - "8889:8889"  # Prometheus scrape endpoint
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro  # Bind mount your config
+    depends_on:
+      - zipkin
+      - jaeger
+    networks:
+      - otel-network
+      
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - otel-network
+      
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - otel-network
+      
+networks:
+  otel-network:
+    driver: bridge
