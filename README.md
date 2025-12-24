@@ -650,9 +650,9 @@ OTel Collection -> 3 Components
 2. Processor 
 3. Exporter
 
-
-
 ```
+![alt text](https://github.com/balaji1974/OpenTelemetry/blob/main/otel-collector.svg?raw=true)
+
 
 
 ## Reference
