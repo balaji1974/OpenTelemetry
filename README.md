@@ -643,22 +643,260 @@ docker compose down
 
 ``` 
 
-## OTel Collector
+# OTel Collector
 ```xml
 OTel Collection -> 3 Components
 1. Receiver
 2. Processor 
 3. Exporter
 
+The OpenTelemetry Collector offers a vendor-agnostic implementation of how to receive, 
+process and export telemetry data. It removes the need to run, operate, and maintain 
+multiple agents/collectors. This works with improved scalability and supports open source 
+observability data formats (e.g. Jaeger, Prometheus, Fluent Bit, etc.) sending to one or 
+more open source or commercial backends.
+
+Objectives
+Usability: Reasonable default configuration, supports popular protocols, runs 
+and collects out of the box.
+Performance: Highly stable and performant under varying loads and configurations.
+Observability: An exemplar of an observable service.
+Extensibility: Customizable without touching the core code.
+Unification: Single codebase, deployable as an agent or collector with support 
+for traces, metrics, and logs.
+
+Read everything here: 
+https://opentelemetry.io/docs/collector/
+
 ```
 ![alt text](https://github.com/balaji1974/OpenTelemetry/blob/main/otel-collector.svg?raw=true)
 
+## Random Number Generator (random-generator)
+```xml
+Lets first create a spring boot application that generates a random number
+and we will use this application as a base for all our collector examples. 
+
+1. Go to spring initilizer and add the following packages:
+Spring Web
+Spring boot Actuator
+Spring boot DevTools
+
+Save the project as random-generator and download. 
+Open it in your IDE. 
+
+2. In the pom.xml you will see the following base dependencies:
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-devtools</artifactId>
+	<scope>runtime</scope>
+	<optional>true</optional>
+</dependency>
+
+3. Create a controller 
+Create a package called controller and 
+inside it create a RandomNumberGenerator controller class
+@RestController
+@RequestMapping ("/random")
+public class RandomNumberGenerator {
+
+	@GetMapping ("/{id}")
+	public Integer findbyId(@PathVariable Integer id) {
+		
+		// nextInt(int bound) generates a number from 0 up to (but not including) the bound
+        return new Random().nextInt(id);
+	}
+	
+}
+
+This is simple controller that returns a random number within 
+the range of any number that is sent as query parameter
+
+
+4. Run the application
+Save and run the application 
+Excute the curl command to see the random numbers being returned:
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+
+5. This class is simple but it will form the base for 
+our OTel collector in further examples below
+
+``` 
+
+## Open Telemetry Collectors
+Collecting Traces, Metrics and Logs (otel-collector)
+```xml
+1. Use the base project (random-generator) and create 
+a new project called otel-collector
+
+2. Add the following dependency management in the pom.xml
+<dependencyManagement>
+	<dependencies>
+	    <dependency>
+	        <groupId>io.opentelemetry.instrumentation</groupId>
+	        <artifactId>opentelemetry-instrumentation-bom</artifactId>
+	        <version>2.23.0</version>
+	        <type>pom</type>
+	        <scope>import</scope>
+	    </dependency>
+	</dependencies>
+</dependencyManagement>
+
+Add the following collector dependency 
+<dependency>
+  <groupId>io.opentelemetry.instrumentation</groupId>
+  <artifactId>opentelemetry-spring-boot-starter</artifactId>
+</dependency>
+
+3. Clean and Build the application 
+Clean and Build the application and check if 
+otel-collector-0.0.1-SNAPSHOT.jar is created on the /target folder 
+
+4. Create a docker file
+This file does step 3 using docker-compose
+Create a docker file with the following contents:
+
+FROM eclipse-temurin:17-jre
+ADD target/otel-collector-0.0.1-SNAPSHOT.jar .
+ENTRYPOINT java -jar otel-collector-0.0.1-SNAPSHOT.jar
+
+5. Create a docker-compose.yaml file with the following contents:
+services:
+  random-generator:
+    container_name: random-generator
+    build: ./
+    environment:
+      OTEL_SERVICE_NAME: 'random-generator'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4318'
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+      OTEL_LOGS_EXPORTER: 'otlp'
+      OTEL_TRACES_EXPORTER: 'otlp'
+      OTEL_METRICS_EXPORTER: 'otlp'
+    ports:
+      - '8080:8080'
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+ 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      - "4318:4318"  # OTLP HTTP endpoint
+      - "8889:8889"  # Prometheus scrape endpoint
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro  # Bind mount your config
+    networks:
+      - otel-network
+      
+networks:
+  otel-network:
+    driver: bridge
+
+
+We have 2 sevices here, first is the random-generator which is our spring boot 
+application. It is configured to emit traces, metrics and logs using otlp 
+(open telemetry) protocol. All observability stats are exported to a collector 
+which runs at http://otel-collector:4318
+
+The open telemetry collector logs all observability stats on to the console. 
+This is configured using otel-collector-config.yaml file.
+
+6. Configuring the collector (otel-collector-config.yaml)
+receivers:
+  otlp:
+    protocols:
+      http: # listens on 4318 , required for metrics via OTLP/HTTP (port 4318) , it uses the default endpoint: 0.0.0.0:4318, which listens on all interfaces — meaning it's accessible from inside Docker and other hosts as well.
+        endpoint: 0.0.0.0:4318
+        # recommended especially if you’re using docker for the collector and your app is outside Docker.
+      #grpc: # listens on 4317 , optional and good for traces
+      
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  batch:
+    timeout: 5s
+    send_batch_size: 2048
+  
+  transform:
+    metric_statements:
+      - context: datapoint
+        statements:
+        - set(attributes["host"], resource.attributes["host.name"])
+        - set(attributes["service"], resource.attributes["service.name"])
+        - set(attributes["container"], resource.attributes["container.id"])
+
+exporters:
+  debug:
+    verbosity: detailed       # Logs incoming metrics and traces , Add debug exporter in your Collector config to visually verify metrics
+    # Then when you run the collector, it will log received metrics to the console.
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch , transform]
+      exporters: [debug]
+
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch , transform]
+      exporters: [debug]
+    
+    logs:
+      receivers: [otlp]
+      exporters: [debug]
+
+
+Here we have 3 main section, the receiver, processor and exporter.
+The receiver receives all observability stats from spring boot application, 
+the processor transforms, filters, or enriches telemetry data,
+while the exporter exports the data to the receiving application. In our case
+we export it to the console for now but will later add other monitoring applications.
+
+7. Run the application from the project root directory
+docker compose up -d
+
+8. Excute the curl command to see the random numbers being returned:
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+
+9. Check the logs of the collector
+docker logs  -f -n100 otel-collector
+We can see all metrics, logs and traces collected by our collector
+
+10. Close the application
+docker compose down
+
+```
+
+## Open Telemetry Collectors - Export traces to Zipkin & Jaeger
+Collecting Traces (otel-trace-exporter)
+```xml
+
+```
 
 
 ## Reference
 ```xml
 https://www.youtube.com/playlist?list=PLLMxXO6kMiNg6EcNCx6C6pydmgUlDDcZY
-
+https://opentelemetry.io/docs/
 ```
 
 
