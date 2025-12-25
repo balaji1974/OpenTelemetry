@@ -976,6 +976,116 @@ docker compose down
 
 ```
 
+## Open Telemetry Collectors - Export metrics to Prometheus (and forward to Grafana)
+Collecting Metrics (otel-metrics-exporter)
+```xml
+Create spring boot application otel-metrics-exporter and 
+following steps 1 to 9 as otel-collector application 
+(follow otel-collector application instruction)
+Check if all monitoring parameters are pushed to otel-collector 
+docker logs  -f -n100 otel-collector
+
+Lets now push metics to Prometheus and visualize in Grafana 
+1. In docker-compose.yaml file add the following services:
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1h
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - otel-network
+      
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on:
+      - prometheus
+    networks:
+      - otel-network
+
+2. Under the otel-collector service in docker-compose.yaml add the following dependency:
+    depends_on:
+      - prometheus
+This makes sure otel-collector is started only after prometheus containers start.
+
+3. In the otel-collector-config.yaml add the following under the exporter
+to indicate the collector to export data to prometheus (otlp supported export)
+exporters:
+  debug:
+    verbosity: detailed       # Logs incoming metrics and traces , Add debug exporter in your Collector config to visually verify metrics
+    # Then when you run the collector, it will log received metrics to the console.
+  prometheus:
+    endpoint: "0.0.0.0:8889"  # Prometheus-compatible endpoint , Prometheus will scrape this endpoint to collect metrics.
+  
+
+4. In the otel-collector-config.yaml add the following under the service -> pipeline 
+-> traces -> exporters
+
+service:
+  pipelines:
+    metrics:
+      exporters: [prometheus, debug]
+
+* Note do not make any changes to other configurations already existing in this section.
+
+5. Clean and Build the application 
+Clean and Build the application and check if 
+otel-metrics-exporter-0.0.1-SNAPSHOT.jar is created on the /target folder 
+
+6. Run the application from the project root directory
+docker compose up -d
+
+7. Excute the curl command to see the random numbers being returned:
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+
+8. Check the logs of the collector
+docker logs  -f -n100 otel-collector
+We can see all metrics, logs and traces collected by our collector
+
+9. Check if metrics are exported to Prometheus:
+Prometheus Metrics 
+Open in your browser http://localhost:8889/metrics
+Search in the page for
+jvm_class_loaded_total
+job="random-generator"
+
+10. Check if metrics are exported to PrometheusUI:
+http://localhost:9090
+Open Prometheus UI: http://localhost:9090
+Run query in http://localhost:9090/
+up{job="otel-collector"}
+jvm_thread_count
+sum by (job) (jvm_thread_count)
+jvm_class_loaded_total
+jvm_class_loaded_total{exported_job="random-generator"}
+
+11. Visualize metrics in Grafna
+http://localhost:3000
+When prompted:
+Select your Prometheus data source
+Add the Prometheus server connection URL 
+http://localhost:9090
+Next go to Drilldown -> Metrics 
+View all jvm related metrics here
+
+12. Close the application
+docker compose down
+
+```
+
 
 ## Reference
 ```xml

@@ -1,0 +1,49 @@
+receivers:
+  otlp:
+    protocols:
+      http: # listens on 4318 , required for metrics via OTLP/HTTP (port 4318) , it uses the default endpoint: 0.0.0.0:4318, which listens on all interfaces — meaning it's accessible from inside Docker and other hosts as well.
+        endpoint: 0.0.0.0:4318
+        # recommended especially if you’re using docker for the collector and your app is outside Docker.
+      #grpc: # listens on 4317 , optional and good for traces
+      
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  batch:
+    timeout: 5s
+    send_batch_size: 2048
+  
+  transform:
+    metric_statements:
+      - context: datapoint
+        statements:
+        - set(attributes["host"], resource.attributes["host.name"])
+        - set(attributes["service"], resource.attributes["service.name"])
+        - set(attributes["container"], resource.attributes["container.id"])
+
+exporters:
+  debug:
+    verbosity: detailed       # Logs incoming metrics and traces , Add debug exporter in your Collector config to visually verify metrics
+    # Then when you run the collector, it will log received metrics to the console.
+  prometheus:
+    endpoint: "0.0.0.0:8889"  # Prometheus-compatible endpoint , Prometheus will scrape this endpoint to collect metrics.
+  
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, transform]
+      exporters: [prometheus, debug]
+
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, transform]
+      exporters: [debug]
+    
+    logs:
+      receivers: [otlp]
+      exporters: [debug]
