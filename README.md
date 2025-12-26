@@ -1269,6 +1269,14 @@ docker compose down
 
 ```
 
+## Open Telemetry Collectors - All in one application
+Collecting Traces, Metrics & Logs (spring-otel-exporter)
+```xml
+This samples puts all the above 3 examples (Traces, Metrics and Logs)
+into one single application. 
+
+```
+
 
 ## Reference
 ```xml
