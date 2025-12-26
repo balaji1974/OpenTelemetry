@@ -1,0 +1,83 @@
+services:
+  otel-exporter:
+    container_name: otel-log-exporter
+    build: ./
+    environment:
+      OTEL_SERVICE_NAME: 'otel-log-exporter'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4318'
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+      OTEL_LOGS_EXPORTER: 'otlp'
+      OTEL_TRACES_EXPORTER: 'otlp'
+      OTEL_METRICS_EXPORTER: 'otlp'
+    ports:
+      - '8080:8080'
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+ 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    ports:
+      #- "4317:4317"  # OTLP gRPC endpoint
+      - "4318:4318"  # OTLP HTTP endpoint
+      - "8889:8889"  # Prometheus scrape endpoint
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro  # Bind mount your config
+    depends_on:
+      - grafana
+    networks:
+      - otel-network
+      
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+        EOF
+        /run.sh
+    depends_on:
+      - loki
+    networks:
+      - otel-network
+      
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks:
+      - otel-network
+
+volumes:
+  loki-data:
+
+networks:
+  otel-network:
+    driver: bridge

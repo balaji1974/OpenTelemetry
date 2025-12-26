@@ -950,28 +950,33 @@ service:
 Clean and Build the application and check if 
 otel-trace-exporter-0.0.1-SNAPSHOT.jar is created on the /target folder 
 
-6. Run the application from the project root directory
+6. Create a Dockerfile to build the container
+FROM eclipse-temurin:17-jre
+ADD target/otel-trace-exporter-0.0.1-SNAPSHOT.jar .
+ENTRYPOINT java -jar otel-trace-exporter-0.0.1-SNAPSHOT.jar
+
+7. Run the application from the project root directory
 docker compose up -d
 
-7. Excute the curl command to see the random numbers being returned:
+8. Excute the curl command to see the random numbers being returned:
 curl --location 'http://localhost:8080/random/100'
 curl --location 'http://localhost:8080/random/100'
 curl --location 'http://localhost:8080/random/100'
 
-8. Check the logs of the collector
+9. Check the logs of the collector
 docker logs  -f -n100 otel-collector
 We can see all metrics, logs and traces collected by our collector
 
-9. Check if traces are exported to Zipkin:
+10. Check if traces are exported to Zipkin:
 Zipkin
 http://localhost:9411/
 
-10. Check if traces are exported to Jaeger 
+11. Check if traces are exported to Jaeger 
 Jaeger
 http://localhost:16686/
 Search -> Service Name (random-generator) -> Find Traces 
 
-11. Close the application
+12. Close the application
 docker compose down
 
 ```
@@ -1039,30 +1044,44 @@ service:
 
 * Note do not make any changes to other configurations already existing in this section.
 
-5. Clean and Build the application 
+5. Create a prometheus.yaml file under the root directory and add the following
+global:
+  scrape_interval: 15s # How often to scrape targets (e.g. 15 seconds)
+
+scrape_configs:
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']  # Change port if your app runs on a different one
+
+6. Clean and Build the application 
 Clean and Build the application and check if 
 otel-metrics-exporter-0.0.1-SNAPSHOT.jar is created on the /target folder 
 
-6. Run the application from the project root directory
+7. Create a Dockerfile to build the container
+FROM eclipse-temurin:17-jre
+ADD target/otel-metrics-exporter-0.0.1-SNAPSHOT.jar .
+ENTRYPOINT java -jar otel-metrics-exporter-0.0.1-SNAPSHOT.jar
+
+8. Run the application from the project root directory
 docker compose up -d
 
-7. Excute the curl command to see the random numbers being returned:
+9. Excute the curl command to see the random numbers being returned:
 curl --location 'http://localhost:8080/random/100'
 curl --location 'http://localhost:8080/random/100'
 curl --location 'http://localhost:8080/random/100'
 
-8. Check the logs of the collector
+10. Check the logs of the collector
 docker logs  -f -n100 otel-collector
 We can see all metrics, logs and traces collected by our collector
 
-9. Check if metrics are exported to Prometheus:
+11. Check if metrics are exported to Prometheus:
 Prometheus Metrics 
 Open in your browser http://localhost:8889/metrics
 Search in the page for
 jvm_class_loaded_total
 job="random-generator"
 
-10. Check if metrics are exported to PrometheusUI:
+12. Check if metrics are exported to PrometheusUI:
 http://localhost:9090
 Open Prometheus UI: http://localhost:9090
 Run query in http://localhost:9090/
@@ -1072,7 +1091,7 @@ sum by (job) (jvm_thread_count)
 jvm_class_loaded_total
 jvm_class_loaded_total{exported_job="random-generator"}
 
-11. Visualize metrics in Grafna
+13. Visualize metrics in Grafna
 http://localhost:3000
 When prompted:
 Select your Prometheus data source
@@ -1081,7 +1100,171 @@ http://localhost:9090
 Next go to Drilldown -> Metrics 
 View all jvm related metrics here
 
-12. Close the application
+14. Close the application
+docker compose down
+
+```
+
+## Open Telemetry Collectors - Export logs to Grafana Dashboard
+Collecting Logs (otel-log-exporter)
+```xml
+Create spring boot application otel-log-exporter and 
+following steps 1 to 9 as otel-collector application 
+(follow otel-collector application instruction)
+Check if all monitoring parameters are pushed to otel-collector 
+docker logs  -f -n100 otel-collector
+
+Lets now push logs to otel-collector and visualize in Grafana 
+1. In docker-compose.yaml file add the following services:
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+        EOF
+        /run.sh
+    depends_on:
+      - loki
+    networks:
+      - otel-network
+      
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks:
+      - otel-network
+
+volumes:
+  loki-data:
+
+2. Under the otel-collector service in docker-compose.yaml add the following dependency:
+    depends_on:
+      - grafana
+This makes sure otel-collector is started only after grafana containers start.
+
+3. In the otel-collector-config.yaml add the following under the exporter
+to indicate the collector to export data to loki (otlp supported export)
+exporters:
+  debug:
+    verbosity: detailed       # Logs incoming metrics and traces , Add debug exporter in your Collector config to visually verify metrics
+    # Then when you run the collector, it will log received metrics to the console.
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp"
+    tls:
+      insecure: true
+  
+
+4. In the otel-collector-config.yaml add the following under the service -> pipeline 
+-> traces -> exporters
+
+service:
+  pipelines:
+    logs:
+      exporters: [otlphttp/loki, debug]
+
+* Note do not make any changes to other configurations already existing in this section.
+
+5. Create a loki-config.yaml file under the root directory and add the following: 
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+limits_config:
+  allow_structured_metadata: true
+
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+storage_config:
+  filesystem:
+    directory: /loki/chunks
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+6. Edit the RandomNumberGenerator.java to add few logs:
+@RestController
+@RequestMapping ("/random")
+public class RandomNumberGenerator {
+	
+	private final Logger LOG = LoggerFactory.getLogger(RandomNumberGenerator.class);
+
+	@GetMapping ("/{id}")
+	public Integer findbyId(@PathVariable Integer id) {
+		LOG.info("Input number is : {}", id);
+		Integer randomNumber=new Random().nextInt(id);
+		LOG.info("Generated random number is : {}", randomNumber);
+        return randomNumber;
+	}
+	
+}
+
+7. Clean and Build the application 
+Clean and Build the application and check if 
+otel-log-exporter-0.0.1-SNAPSHOT.jar is created on the /target folder 
+
+8. Create a Dockerfile to build the container
+FROM eclipse-temurin:17-jre
+ADD target/otel-log-exporter-0.0.1-SNAPSHOT.jar .
+ENTRYPOINT java -jar otel-log-exporter-0.0.1-SNAPSHOT.jar
+
+9. Run the application from the project root directory
+docker compose up -d
+
+10. Excute the curl command to see the random numbers being returned:
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+curl --location 'http://localhost:8080/random/100'
+
+11. Check the logs of the collector
+docker logs  -f -n100 otel-collector
+We can see all metrics, logs and traces collected by our collector
+
+12. Visualize logs in Grafna
+http://localhost:3000
+Go to Drilldown -> Logs 
+View all application related logs here
+
+13. Close the application
 docker compose down
 
 ```
