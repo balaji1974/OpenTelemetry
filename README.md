@@ -1277,11 +1277,199 @@ into one single application.
 
 ```
 
+## Open Telemetry with Springboot 4 (spring-observability)
+```xml
+With Springboot 4 Observability becomes much more easier.
+Look at the below article for more information.
+https://spring.io/blog/2025/11/18/opentelemetry-with-spring-boot
+
+Also look at the below repo for a sample
+https://github.com/danvega/ot/blob/master/README.md
+
+Spring boot 4 OpenTelemetry uses the Grafana LGTM stack 
+- Loki (logs), Grafana (Visualization), Tempo (Traces), Mimir (Metrics) 
+
+Lets create a spring boot application version 4.0.1 
+and we will use this application to check Otel Observability capabilites. 
+
+1. Go to spring initilizer and add the following packages:
+Spring Web
+OpenTelemetry
+Docker Compose Support
+(**important to select version 4.0.1)
+
+Save the project as spring-observability and download. 
+Open it in your IDE. 
+
+2. In the pom.xml you will see the following base dependencies:
+<!-- For Tracing and Metrics-->
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-opentelemetry</artifactId>
+</dependency>
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-webmvc</artifactId>
+</dependency>
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-docker-compose</artifactId>
+	<scope>runtime</scope>
+	<optional>true</optional>
+</dependency>
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-opentelemetry-test</artifactId>
+	<scope>test</scope>
+</dependency>
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-webmvc-test</artifactId>
+	<scope>test</scope>
+</dependency>
+
+Add the below 2 extra dependencies:
+<!-- For Logging-->
+<dependency>
+    <groupId>io.opentelemetry.instrumentation</groupId>
+    <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+    <version>2.21.0-alpha</version>
+</dependency>
+<!-- For Injecting Custom Metrics-->
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+	<artifactId>spring-boot-starter-aop</artifactId>
+	<version>3.3.5</version>
+</dependency>
+
+3. Create a compose.yaml file add the following services:
+services:
+  grafana-lgtm:
+    image: 'grafana/otel-lgtm:latest'
+    ports:
+      - '3000:3000'
+      - '4317:4317'
+      - '4318:4318'
+
+4. Add the following properties in the application.properties 
+spring.otlp.metrics.export.url=http://localhost:4318/v1/metrics
+spring.opentelemetry.tracing.export.otlp.endpoint=http://localhost:4318/v1/traces
+spring.opentelemetry.logging.export.otlp.endpoint=http://localhost:4318/v1/logs
+management.tracing.sampling.probability=1.0
+server.shutdown=immediate
+logging.level.com.java.bala=INFO
+logging.level.org.springframework.boot.actuator.autoconfigure.opentelemetry=DEBUG
+logging.level.org.springframework.boot.docker.compose=DEBUG
+
+5. For logging create a logback-spring.xml file under the resources folder
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="OTEL"/>
+    </root>
+</configuration>
+
+6. Create a Contoller called HomeController.java under the controller package
+@RestController
+public class HomeController {
+
+    private static final Logger log = LoggerFactory.getLogger(HomeController.class);
+
+    @GetMapping("/")
+    public String home() {
+        log.info("Home endpoint called");
+        return "Hello World!";
+    }
+
+    @GetMapping("/greet/{name}")
+    public String greet(@PathVariable String name) {
+        log.info("Greeting user: {}", name);
+        simulateWork();
+        return "Hello, " + name + "!";
+    }
+
+    @GetMapping("/slow")
+    @Observed(name = "my.slow.operation")
+    public String slow() throws InterruptedException {
+        log.info("Starting slow operation");
+        Thread.sleep(500);
+        log.info("Slow operation completed");
+        return "Done!";
+    }
+
+    private void simulateWork() {
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+Note: **
+@Observed(name = "my.slow.operation")
+** 
+This is for injecting custom metrics 
+
+7. For injecting logging create a component called 
+InstallOpenTelemetryAppender.java inside the component package
+@Component
+class InstallOpenTelemetryAppender implements InitializingBean {
+
+    private final OpenTelemetry openTelemetry;
+
+    InstallOpenTelemetryAppender(OpenTelemetry openTelemetry) {
+        this.openTelemetry = openTelemetry;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        OpenTelemetryAppender.install(this.openTelemetry);
+    }
+}
+
+
+8. Clean, Build and Run the application using maven:
+./mvnw spring-boot:run
+or from eclipse maven set goal as 
+spring-boot:run and run it.
+
+
+9. Excute the curl command:
+curl --location 'http://localhost:8080/'
+curl --location 'http://localhost:8080/'
+curl --location 'http://localhost:8080/greet/World'
+curl --location 'http://localhost:8080/greet/World'
+curl --location 'http://localhost:8080/slow'
+curl --location 'http://localhost:8080/slow'
+
+10. Visualize metrics, logs and traces in Grafna
+http://localhost:3000
+Go to Drilldown -> 
+Metrics
+Logs 
+Traces
+View all application telemetry here
+
+11. Finally close the application
+
+With just a few configuration steps Spring Boot 4.0.1 has 
+enabled the LGTM stack for all our telemetry needs. 
+
+```
 
 ## Reference
 ```xml
 https://www.youtube.com/playlist?list=PLLMxXO6kMiNg6EcNCx6C6pydmgUlDDcZY
 https://opentelemetry.io/docs/
+https://spring.io/blog/2025/11/18/opentelemetry-with-spring-boot
+https://www.youtube.com/watch?v=6_Y41z7OIv8
 ```
 
 
